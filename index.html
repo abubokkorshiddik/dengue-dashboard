@@ -3,7 +3,7 @@
 <head>
     <title>Dengue dashboard Bangladesh</title>
 
-    <!-- Plotly for chart -->
+    <!-- Plotly for charts and maps -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 
     <style>
@@ -12,27 +12,24 @@
             margin: 20px;
             background: #f5f5f5;
         }
-
         h2 {
             color: #333;
         }
-
         #controls {
             margin-bottom: 20px;
             padding: 10px;
             background: white;
             border-radius: 8px;
         }
-
         select {
             margin-right: 15px;
             padding: 5px;
         }
-
-        #chart {
+        #chart, #map {
             background: white;
             padding: 10px;
             border-radius: 8px;
+            margin-top: 20px;
         }
     </style>
 </head>
@@ -51,13 +48,15 @@
     </select>
 </div>
 
-<div id="chart"></div>
+<div id="chart" style="height: 500px;"></div>
+<div id="map" style="height: 600px;"></div>
 
 <script>
 let casesData = [];
 let ewsData = [];
+let geoData = [];
 
-// Load both JSON files
+// Load cases & EWS JSON files
 async function loadData() {
     try {
         const resCases = await fetch("dengue_bd.json");
@@ -66,7 +65,6 @@ async function loadData() {
         const resEWS = await fetch("dengue_ews.json");
         const jsonEWS = await resEWS.json();
 
-        // Store historical cases
         casesData = jsonCases.map(d => ({
             District: d.District,
             Month: d.Month,
@@ -75,7 +73,6 @@ async function loadData() {
             Cases: Number(d.Monthly_cases)
         }));
 
-        // Store future EWS
         ewsData = jsonEWS.map(d => ({
             District: d.District,
             Month: Number(d.Month),
@@ -86,9 +83,24 @@ async function loadData() {
 
         initControls();
         plotData();
+
+        // After data loaded, load GeoJSON map
+        await loadGeoJSON();
     } catch (err) {
         console.error(err);
-        alert("Error loading JSON files. Make sure both dengue_bd.json and dengue_ews.json exist in the same folder.");
+        alert("Error loading JSON files.");
+    }
+}
+
+// Load GeoJSON
+async function loadGeoJSON() {
+    try {
+        const response = await fetch("bangladesh_districts_small.json");
+        geoData = await response.json();
+        plotMap();
+    } catch (err) {
+        console.error(err);
+        alert("Error loading GeoJSON map file.");
     }
 }
 
@@ -123,22 +135,19 @@ function initControls() {
     document.getElementById("yearSelect").addEventListener("change", plotData);
 }
 
-// Plot chart
+// Plot line chart for cases & EWS
 function plotData() {
     const district = document.getElementById("districtSelect").value;
     const year = document.getElementById("yearSelect").value;
 
-    // Historical cases
     let filteredCases = casesData.filter(d => d.District === district);
     if (year !== "All") filteredCases = filteredCases.filter(d => d.Year == year);
     filteredCases.sort((a,b) => a.Year - b.Year || a.Month1 - b.Month1);
 
-    // Future EWS
     let filteredEWS = ewsData.filter(d => d.District === district);
     if (year !== "All") filteredEWS = filteredEWS.filter(d => d.Year == year);
     filteredEWS.sort((a,b) => a.Year - b.Year || a.Month - b.Month);
 
-    // X axis
     const xCases = filteredCases.map(d => `${d.Month}-${d.Year}`);
     const yCases = filteredCases.map(d => d.Cases);
 
@@ -184,6 +193,37 @@ function plotData() {
     };
 
     Plotly.newPlot("chart", [traceCases, traceProb, traceAlert], layout, {responsive: true});
+}
+
+// Plot choropleth map
+function plotMap() {
+    const districtCases = {};
+    casesData.forEach(d => {
+        if (!districtCases[d.District]) districtCases[d.District] = 0;
+        districtCases[d.District] += d.Cases;
+    });
+
+    const data = [{
+        type: "choroplethmapbox",
+        geojson: geoData,
+        locations: Object.keys(districtCases),
+        z: Object.values(districtCases),
+        featureidkey: "properties.ADM2_EN",
+        colorscale: "YlOrRd",
+        marker: {line: {width: 0.5, color: "white"}},
+        colorbar: {title: "Total cases"}
+    }];
+
+    const layout = {
+        mapbox: {
+            style: "carto-positron",
+            center: {lon: 90.5, lat: 23.5},
+            zoom: 6
+        },
+        margin: {t:0, b:0}
+    };
+
+    Plotly.newPlot("map", data, layout, {responsive: true});
 }
 
 // Start
