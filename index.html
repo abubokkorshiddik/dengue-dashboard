@@ -6,160 +6,139 @@
     <style>
         body { font-family: Arial; margin: 20px; background: #f5f5f5; }
         h2 { color: #333; }
-        #controls { margin-bottom: 20px; padding: 10px; background: white; border-radius: 8px; }
+        .controls { margin-bottom: 20px; padding: 10px; background: white; border-radius: 8px; }
         select { margin-right: 15px; padding: 5px; }
-        #chart, #map { background: white; padding: 10px; border-radius: 8px; margin-top: 20px; }
+        #trendChart, #monthMap { background: white; padding: 10px; border-radius: 8px; margin-top: 20px; }
     </style>
 </head>
 <body>
 
-<h2>Dengue monthly cases and early warning dashboard</h2>
-
-<div id="controls">
-    District:
-    <select id="districtSelect"></select>
-    Year:
-    <select id="yearSelect"><option value="All">All</option></select>
+<h2>Section 1: Monthly trend by district</h2>
+<div class="controls">
+    District: <select id="districtSelect"></select>
+    Year: <select id="yearSelect"><option value="All">All</option></select>
 </div>
+<div id="trendChart"></div>
 
-<div id="chart"></div>
-<div id="map" style="height:600px;"></div>
+<h2>Section 2: Map view by month</h2>
+<div class="controls">
+    Year: <select id="mapYearSelect"></select>
+    Month: <select id="mapMonthSelect"></select>
+    Data type: 
+    <select id="mapTypeSelect">
+        <option value="Cases">Cases</option>
+        <option value="Prob_High_Dengue">Predicted probability</option>
+    </select>
+</div>
+<div id="monthMap" style="height:600px;"></div>
 
 <script>
-let casesData = [], ewsData = [], mapData = [];
+let casesData=[], ewsData=[], mapData=[];
 
-// Load all JSON files
+// Load JSONs
 async function loadData() {
-    try {
-        const resCases = await fetch("dengue_bd.json");
-        const resEWS = await fetch("dengue_ews.json");
-        const resMap  = await fetch("bangladesh_districts_small.json");
+    const [jsonCases, jsonEWS, jsonMap] = await Promise.all([
+        fetch("dengue_bd.json").then(r=>r.json()),
+        fetch("dengue_ews.json").then(r=>r.json()),
+        fetch("bangladesh_districts_small.json").then(r=>r.json())
+    ]);
+    casesData = jsonCases.map(d=>({District:d.District, Month:d.Month, Month1:+d.Month1, Year:+d.Year, Cases:+d.Monthly_cases}));
+    ewsData   = jsonEWS.map(d=>({District:d.District, Month:+d.Month, Year:+d.Year, Prob_High_Dengue:+d.Prob_High_Dengue, High_Alert:+d.High_Alert}));
+    mapData   = jsonMap;
 
-        const jsonCases = await resCases.json();
-        const jsonEWS   = await resEWS.json();
-        mapData         = await resMap.json();
-
-        // Store historical cases
-        casesData = jsonCases.map(d => ({
-            District: d.District,
-            Month: d.Month,
-            Month1: Number(d.Month1),
-            Year: Number(d.Year),
-            Cases: Number(d.Monthly_cases)
-        }));
-
-        // Store future EWS
-        ewsData = jsonEWS.map(d => ({
-            District: d.District,
-            Month: Number(d.Month),
-            Year: Number(d.Year),
-            Prob_High_Dengue: Number(d.Prob_High_Dengue),
-            High_Alert: Number(d.High_Alert)
-        }));
-
-        initControls();
-        plotTrend();
-        plotMap();
-    } catch(err) {
-        console.error(err);
-        alert("Error loading JSON files. Make sure all JSON files exist in the same folder.");
-    }
+    initTrendControls();
+    initMapControls();
+    plotTrend();
+    plotMonthMap();
 }
 
-// Unique values
-function getUnique(data, key) { return [...new Set(data.map(d => d[key]))]; }
-
-// Populate dropdown
-function populateDropdown(id, values) {
-    const select = document.getElementById(id);
-    select.innerHTML = "";
-    values.forEach(v => { const opt = document.createElement("option"); opt.value=v; opt.text=v; select.appendChild(opt); });
+// Utilities
+function getUnique(data,key){return[...new Set(data.map(d=>d[key]))];}
+function populateDropdown(id, values){
+    const sel=document.getElementById(id); sel.innerHTML="";
+    values.forEach(v=>{ const opt=document.createElement("option"); opt.value=v; opt.text=v; sel.appendChild(opt); });
 }
 
-// Initialize controls
-function initControls() {
-    const districts = getUnique(casesData, "District").sort();
-    const years = getUnique(casesData.concat(ewsData), "Year").sort();
-    populateDropdown("districtSelect", districts);
-    populateDropdown("yearSelect", ["All", ...years]);
-
-    document.getElementById("districtSelect").value = districts[0];
-    document.getElementById("districtSelect").addEventListener("change", ()=>{ plotTrend(); plotMap(); });
-    document.getElementById("yearSelect").addEventListener("change", ()=>{ plotTrend(); plotMap(); });
+// Section 1: Trend controls
+function initTrendControls(){
+    populateDropdown("districtSelect", getUnique(casesData,"District").sort());
+    populateDropdown("yearSelect", ["All", ...getUnique(casesData.concat(ewsData),"Year").sort()]);
+    document.getElementById("districtSelect").addEventListener("change", plotTrend);
+    document.getElementById("yearSelect").addEventListener("change", plotTrend);
 }
 
-// Plot trend chart
-function plotTrend() {
+// Section 2: Map controls
+function initMapControls(){
+    populateDropdown("mapYearSelect", getUnique(casesData.concat(ewsData),"Year").sort());
+    populateDropdown("mapMonthSelect", [1,2,3,4,5,6,7,8,9,10,11,12]);
+    document.getElementById("mapYearSelect").addEventListener("change", plotMonthMap);
+    document.getElementById("mapMonthSelect").addEventListener("change", plotMonthMap);
+    document.getElementById("mapTypeSelect").addEventListener("change", plotMonthMap);
+}
+
+// Section 1: Trend chart
+function plotTrend(){
     const district = document.getElementById("districtSelect").value;
-    const year = document.getElementById("yearSelect").value;
+    const year     = document.getElementById("yearSelect").value;
 
-    let filteredCases = casesData.filter(d=>d.District===district);
-    if(year!=="All") filteredCases = filteredCases.filter(d=>d.Year==year);
-    filteredCases.sort((a,b)=>a.Year-b.Year||a.Month1-b.Month1);
+    let fCases = casesData.filter(d=>d.District===district);
+    if(year!=="All") fCases = fCases.filter(d=>d.Year==year);
+    fCases.sort((a,b)=>a.Year-b.Year||a.Month1-b.Month1);
 
-    let filteredEWS = ewsData.filter(d=>d.District===district);
-    if(year!=="All") filteredEWS = filteredEWS.filter(d=>d.Year==year);
-    filteredEWS.sort((a,b)=>a.Year-b.Year||a.Month-b.Month);
+    let fEWS = ewsData.filter(d=>d.District===district);
+    if(year!=="All") fEWS = fEWS.filter(d=>d.Year==year);
+    fEWS.sort((a,b)=>a.Year-b.Year||a.Month-b.Month);
 
-    const xCases = filteredCases.map(d=>`${d.Month}-${d.Year}`);
-    const yCases = filteredCases.map(d=>d.Cases);
+    const xCases=fCases.map(d=>`${d.Month}-${d.Year}`);
+    const yCases=fCases.map(d=>d.Cases);
 
-    const xEWS = filteredEWS.map(d=>`${d.Month}-${d.Year}`);
-    const yProb = filteredEWS.map(d=>d.Prob_High_Dengue);
-    const xAlert = xEWS.filter((_,i)=>filteredEWS[i].High_Alert===1);
-    const yAlert = yProb.filter((_,i)=>filteredEWS[i].High_Alert===1);
+    const xEWS=fEWS.map(d=>`${d.Month}-${d.Year}`);
+    const yProb=fEWS.map(d=>d.Prob_High_Dengue);
+    const xAlert=xEWS.filter((_,i)=>fEWS[i].High_Alert===1);
+    const yAlert=yProb.filter((_,i)=>fEWS[i].High_Alert===1);
 
-    const traceCases = { x:xCases, y:yCases, mode:"lines+markers", type:"scatter", name:"Monthly cases", line:{color:"#FF4136"}, marker:{size:6} };
-    const traceProb  = { x:xEWS, y:yProb, mode:"lines+markers", type:"scatter", name:"Predicted probability", line:{color:"#0074D9", dash:"dot"}, marker:{size:6} };
-    const traceAlert = { x:xAlert, y:yAlert, mode:"markers", type:"scatter", name:"High Alert", marker:{color:"orange", size:10, symbol:"triangle-up"} };
+    const traceCases={x:xCases,y:yCases,mode:"lines+markers",type:"scatter",name:"Monthly cases",line:{color:"#FF4136"},marker:{size:6}};
+    const traceProb={x:xEWS,y:yProb,mode:"lines+markers",type:"scatter",name:"Predicted probability",line:{color:"#0074D9",dash:"dot"},marker:{size:6}};
+    const traceAlert={x:xAlert,y:yAlert,mode:"markers",type:"scatter",name:"High Alert",marker:{color:"orange",size:10,symbol:"triangle-up"}};
 
-    Plotly.newPlot("chart",[traceCases,traceProb,traceAlert],{title:`Dengue cases and future alerts in ${district}`, xaxis:{title:"Month-Year", tickangle:-45}, yaxis:{title:"Cases / Probability"}, margin:{t:50,b:100}},{responsive:true});
+    Plotly.newPlot("trendChart",[traceCases,traceProb,traceAlert],
+        {title:`Dengue cases and future alerts in ${district}`, xaxis:{title:"Month-Year", tickangle:-45}, yaxis:{title:"Cases / Probability"}, margin:{t:50,b:100}},{responsive:true});
 }
 
-// Plot Bangladesh district map
-function plotMap() {
-    const year = document.getElementById("yearSelect").value;
+// Section 2: Month map
+function plotMonthMap(){
+    const year  = +document.getElementById("mapYearSelect").value;
+    const month = +document.getElementById("mapMonthSelect").value;
+    const type  = document.getElementById("mapTypeSelect").value; // "Cases" or "Prob_High_Dengue"
 
-    // Aggregate cases or probability by district
-    let dataForMap = {};
-    mapData.features.forEach(f=>{
-        const dName = f.properties.ADM2_EN;
-        let val = 0;
-        if(year==="All"){
-            // sum all years
-            val = casesData.filter(d=>d.District===dName).reduce((a,b)=>a+b.Cases,0);
-        } else {
-            const cases = casesData.filter(d=>d.District===dName && d.Year==year);
-            const ews   = ewsData.filter(d=>d.District===dName && d.Year==year);
-            val = cases.length>0? cases.reduce((a,b)=>a+b.Cases,0) : (ews.length>0 ? Math.max(...ews.map(d=>d.Prob_High_Dengue)) : 0);
+    // Prepare data per district
+    let values = mapData.features.map(f=>{
+        const dName=f.properties.ADM2_EN;
+        let val=0;
+        if(type==="Cases"){
+            const rec=casesData.find(d=>d.District===dName && d.Year===year && d.Month===month);
+            val=rec? rec.Cases:0;
+        } else{
+            const rec=ewsData.find(d=>d.District===dName && d.Year===year && d.Month===month);
+            val=rec? rec.Prob_High_Dengue:0;
         }
-        dataForMap[dName] = val;
+        return val;
     });
 
-    const zValues = mapData.features.map(f=>dataForMap[f.properties.ADM2_EN] || 0);
-
-    const trace = {
-        type:"choroplethmapbox",
-        geojson: mapData,
-        locations: mapData.features.map(f=>f.properties.ADM2_EN),
-        z: zValues,
+    const trace={type:"choroplethmapbox", geojson:mapData,
+        locations:mapData.features.map(f=>f.properties.ADM2_EN),
+        z:values,
         featureidkey:"properties.ADM2_EN",
         colorscale:"YlOrRd",
-        colorbar:{title:"Cases / Prob"},
-        marker:{line:{width:0.5, color:"black"}}
-    };
+        colorbar:{title:type},
+        marker:{line:{width:0.5,color:"black"}}};
 
-    const layout = {
-        mapbox:{style:"carto-positron", center:{lat:23.685, lon:90.3563}, zoom:6},
-        margin:{t:0,b:0,l:0,r:0}
-    };
-
-    Plotly.newPlot("map",[trace],layout,{responsive:true});
+    const layout={mapbox:{style:"carto-positron",center:{lat:23.685,lon:90.3563},zoom:6},margin:{t:0,b:0,l:0,r:0}};
+    Plotly.newPlot("monthMap",[trace],layout,{responsive:true});
 }
 
 // Start
 loadData();
 </script>
-
 </body>
 </html>
