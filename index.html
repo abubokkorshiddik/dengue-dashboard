@@ -3,7 +3,7 @@
 <head>
     <title>Dengue dashboard Bangladesh</title>
 
-    <!-- Plotly for charts and maps -->
+    <!-- Plotly for charts and map -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 
     <style>
@@ -29,11 +29,13 @@
             background: white;
             padding: 10px;
             border-radius: 8px;
-            margin-top: 20px;
+            margin-bottom: 30px;
+        }
+        #map {
+            height: 500px;
         }
     </style>
 </head>
-
 <body>
 
 <h2>Dengue monthly cases and early warning dashboard</h2>
@@ -48,24 +50,24 @@
     </select>
 </div>
 
-<div id="chart" style="height: 500px;"></div>
-<div id="map" style="height: 600px;"></div>
+<div id="chart"></div>
+<div id="map"></div>
 
 <script>
 let casesData = [];
 let ewsData = [];
 let geoData = [];
 
-// Load cases & EWS JSON files
+// Load all JSON files
 async function loadData() {
     try {
-        const resCases = await fetch("dengue_bd.json");
-        const jsonCases = await resCases.json();
+        const [resCases, resEWS, resGeo] = await Promise.all([
+            fetch("dengue_bd.json"),
+            fetch("dengue_ews.json"),
+            fetch("bangladesh_districts_small.json")
+        ]);
 
-        const resEWS = await fetch("dengue_ews.json");
-        const jsonEWS = await resEWS.json();
-
-        casesData = jsonCases.map(d => ({
+        casesData = (await resCases.json()).map(d => ({
             District: d.District,
             Month: d.Month,
             Month1: Number(d.Month1),
@@ -73,7 +75,7 @@ async function loadData() {
             Cases: Number(d.Monthly_cases)
         }));
 
-        ewsData = jsonEWS.map(d => ({
+        ewsData = (await resEWS.json()).map(d => ({
             District: d.District,
             Month: Number(d.Month),
             Year: Number(d.Year),
@@ -81,26 +83,13 @@ async function loadData() {
             High_Alert: Number(d.High_Alert)
         }));
 
+        geoData = await resGeo.json();
+
         initControls();
         plotData();
-
-        // After data loaded, load GeoJSON map
-        await loadGeoJSON();
     } catch (err) {
         console.error(err);
-        alert("Error loading JSON files.");
-    }
-}
-
-// Load GeoJSON
-async function loadGeoJSON() {
-    try {
-        const response = await fetch("bangladesh_districts_small.json");
-        geoData = await response.json();
-        plotMap();
-    } catch (err) {
-        console.error(err);
-        alert("Error loading GeoJSON map file.");
+        alert("Error loading JSON files. Make sure dengue_bd.json, dengue_ews.json, and bangladesh_districts_small.json exist.");
     }
 }
 
@@ -135,15 +124,17 @@ function initControls() {
     document.getElementById("yearSelect").addEventListener("change", plotData);
 }
 
-// Plot line chart for cases & EWS
+// Plot line chart and future alerts
 function plotData() {
     const district = document.getElementById("districtSelect").value;
     const year = document.getElementById("yearSelect").value;
 
+    // Historical cases
     let filteredCases = casesData.filter(d => d.District === district);
     if (year !== "All") filteredCases = filteredCases.filter(d => d.Year == year);
     filteredCases.sort((a,b) => a.Year - b.Year || a.Month1 - b.Month1);
 
+    // Future EWS
     let filteredEWS = ewsData.filter(d => d.District === district);
     if (year !== "All") filteredEWS = filteredEWS.filter(d => d.Year == year);
     filteredEWS.sort((a,b) => a.Year - b.Year || a.Month - b.Month);
@@ -185,22 +176,31 @@ function plotData() {
         marker: { color: "orange", size: 10, symbol: "triangle-up" }
     };
 
-    const layout = {
+    Plotly.newPlot("chart", [traceCases, traceProb, traceAlert], {
         title: `Dengue cases and future alerts in ${district}`,
         xaxis: { title: "Month-Year", tickangle: -45 },
         yaxis: { title: "Cases / Probability" },
         margin: { t: 50, b: 100 }
-    };
+    }, {responsive: true});
 
-    Plotly.newPlot("chart", [traceCases, traceProb, traceAlert], layout, {responsive: true});
+    // Update map
+    plotMap(year);
 }
 
 // Plot choropleth map
-function plotMap() {
+function plotMap(selectedYear = "All") {
     const districtCases = {};
+    geoData.features.forEach(f => {
+        const name = f.properties.ADM2_EN;
+        districtCases[name] = 0;
+    });
+
     casesData.forEach(d => {
-        if (!districtCases[d.District]) districtCases[d.District] = 0;
-        districtCases[d.District] += d.Cases;
+        if ((selectedYear === "All") || (d.Year == selectedYear)) {
+            if (districtCases.hasOwnProperty(d.District)) {
+                districtCases[d.District] += d.Cases;
+            }
+        }
     });
 
     const data = [{
