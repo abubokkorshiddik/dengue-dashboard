@@ -2,82 +2,44 @@
 <html>
 <head>
     <title>Dengue dashboard Bangladesh</title>
-
-    <!-- Plotly -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-
     <style>
-        body {
-            font-family: Arial;
-            margin: 20px;
-            background: #f5f5f5;
-        }
-
-        h2, h3 {
-            color: #333;
-            margin-top: 30px;
-        }
-
-        #controls {
-            margin-bottom: 20px;
-            padding: 10px;
-            background: white;
-            border-radius: 8px;
-        }
-
-        select {
-            margin-right: 15px;
-            padding: 5px;
-        }
-
-        #trend, #map {
-            background: white;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-            width: 100%;
-        }
-
-        #trend {
-            height: 400px;
-        }
-
-        #map {
-            height: 500px;
-        }
+        body { font-family: Arial; margin: 20px; background: #f5f5f5; }
+        h2 { color: #333; }
+        #controls { margin-bottom: 20px; padding: 10px; background: white; border-radius: 8px; }
+        select { margin-right: 15px; padding: 5px; }
+        #chart, #map { background: white; padding: 10px; border-radius: 8px; margin-top: 20px; }
     </style>
 </head>
 <body>
 
-<h2>Dengue dashboard Bangladesh</h2>
+<h2>Dengue monthly cases and early warning dashboard</h2>
 
 <div id="controls">
     District:
     <select id="districtSelect"></select>
-
     Year:
-    <select id="yearSelect">
-        <option value="All">All</option>
-    </select>
+    <select id="yearSelect"><option value="All">All</option></select>
 </div>
 
-<h3>Trend chart (monthly cases + early warning)</h3>
-<div id="trend"></div>
-
-<h3>District map</h3>
-<div id="map"></div>
+<div id="chart"></div>
+<div id="map" style="height:600px;"></div>
 
 <script>
-let casesData = [];
-let ewsData = [];
-let mapData = [];
+let casesData = [], ewsData = [], mapData = [];
 
-// Load JSON data
+// Load all JSON files
 async function loadData() {
     try {
-        // Historical cases
         const resCases = await fetch("dengue_bd.json");
+        const resEWS = await fetch("dengue_ews.json");
+        const resMap  = await fetch("bangladesh_districts_small.json");
+
         const jsonCases = await resCases.json();
+        const jsonEWS   = await resEWS.json();
+        mapData         = await resMap.json();
+
+        // Store historical cases
         casesData = jsonCases.map(d => ({
             District: d.District,
             Month: d.Month,
@@ -86,9 +48,7 @@ async function loadData() {
             Cases: Number(d.Monthly_cases)
         }));
 
-        // Early warning
-        const resEWS = await fetch("dengue_ews.json");
-        const jsonEWS = await resEWS.json();
+        // Store future EWS
         ewsData = jsonEWS.map(d => ({
             District: d.District,
             Month: Number(d.Month),
@@ -97,54 +57,35 @@ async function loadData() {
             High_Alert: Number(d.High_Alert)
         }));
 
-        // Map geojson
-        const resMap = await fetch("bangladesh_districts_small.json");
-        mapData = await resMap.json();
-
         initControls();
         plotTrend();
         plotMap();
-    } catch (err) {
+    } catch(err) {
         console.error(err);
-        alert("Error loading JSON files. Check dengue_bd.json, dengue_ews.json, and bangladesh_districts_small.json exist.");
+        alert("Error loading JSON files. Make sure all JSON files exist in the same folder.");
     }
 }
 
-// Unique helper
-function getUnique(data, key) {
-    return [...new Set(data.map(d => d[key]))];
-}
+// Unique values
+function getUnique(data, key) { return [...new Set(data.map(d => d[key]))]; }
 
 // Populate dropdown
 function populateDropdown(id, values) {
     const select = document.getElementById(id);
     select.innerHTML = "";
-    values.forEach(v => {
-        const opt = document.createElement("option");
-        opt.value = v;
-        opt.text = v;
-        select.appendChild(opt);
-    });
+    values.forEach(v => { const opt = document.createElement("option"); opt.value=v; opt.text=v; select.appendChild(opt); });
 }
 
-// Initialize dropdowns
+// Initialize controls
 function initControls() {
     const districts = getUnique(casesData, "District").sort();
     const years = getUnique(casesData.concat(ewsData), "Year").sort();
-
     populateDropdown("districtSelect", districts);
     populateDropdown("yearSelect", ["All", ...years]);
 
     document.getElementById("districtSelect").value = districts[0];
-
-    document.getElementById("districtSelect").addEventListener("change", () => {
-        plotTrend();
-        plotMap();
-    });
-    document.getElementById("yearSelect").addEventListener("change", () => {
-        plotTrend();
-        plotMap();
-    });
+    document.getElementById("districtSelect").addEventListener("change", ()=>{ plotTrend(); plotMap(); });
+    document.getElementById("yearSelect").addEventListener("change", ()=>{ plotTrend(); plotMap(); });
 }
 
 // Plot trend chart
@@ -152,100 +93,68 @@ function plotTrend() {
     const district = document.getElementById("districtSelect").value;
     const year = document.getElementById("yearSelect").value;
 
-    // Historical cases
-    let filteredCases = casesData.filter(d => d.District === district);
-    if (year !== "All") filteredCases = filteredCases.filter(d => d.Year == year);
-    filteredCases.sort((a,b) => a.Year - b.Year || a.Month1 - b.Month1);
+    let filteredCases = casesData.filter(d=>d.District===district);
+    if(year!=="All") filteredCases = filteredCases.filter(d=>d.Year==year);
+    filteredCases.sort((a,b)=>a.Year-b.Year||a.Month1-b.Month1);
 
-    // EWS
-    let filteredEWS = ewsData.filter(d => d.District === district);
-    if (year !== "All") filteredEWS = filteredEWS.filter(d => d.Year == year);
-    filteredEWS.sort((a,b) => a.Year - b.Year || a.Month - b.Month);
+    let filteredEWS = ewsData.filter(d=>d.District===district);
+    if(year!=="All") filteredEWS = filteredEWS.filter(d=>d.Year==year);
+    filteredEWS.sort((a,b)=>a.Year-b.Year||a.Month-b.Month);
 
-    const xCases = filteredCases.map(d => `${d.Month}-${d.Year}`);
-    const yCases = filteredCases.map(d => d.Cases);
+    const xCases = filteredCases.map(d=>`${d.Month}-${d.Year}`);
+    const yCases = filteredCases.map(d=>d.Cases);
 
-    const xEWS = filteredEWS.map(d => `${d.Month}-${d.Year}`);
-    const yProb = filteredEWS.map(d => d.Prob_High_Dengue);
-    const xAlert = xEWS.filter((_, i) => filteredEWS[i].High_Alert === 1);
-    const yAlert = yProb.filter((_, i) => filteredEWS[i].High_Alert === 1);
+    const xEWS = filteredEWS.map(d=>`${d.Month}-${d.Year}`);
+    const yProb = filteredEWS.map(d=>d.Prob_High_Dengue);
+    const xAlert = xEWS.filter((_,i)=>filteredEWS[i].High_Alert===1);
+    const yAlert = yProb.filter((_,i)=>filteredEWS[i].High_Alert===1);
 
-    const traceCases = {
-        x: xCases,
-        y: yCases,
-        mode: "lines+markers",
-        type: "scatter",
-        name: "Monthly cases",
-        line: { color: "#FF4136" },
-        marker: { size: 6 }
-    };
+    const traceCases = { x:xCases, y:yCases, mode:"lines+markers", type:"scatter", name:"Monthly cases", line:{color:"#FF4136"}, marker:{size:6} };
+    const traceProb  = { x:xEWS, y:yProb, mode:"lines+markers", type:"scatter", name:"Predicted probability", line:{color:"#0074D9", dash:"dot"}, marker:{size:6} };
+    const traceAlert = { x:xAlert, y:yAlert, mode:"markers", type:"scatter", name:"High Alert", marker:{color:"orange", size:10, symbol:"triangle-up"} };
 
-    const traceProb = {
-        x: xEWS,
-        y: yProb,
-        mode: "lines+markers",
-        type: "scatter",
-        name: "Predicted probability",
-        line: { color: "#0074D9", dash: "dot" },
-        marker: { size: 6 }
-    };
-
-    const traceAlert = {
-        x: xAlert,
-        y: yAlert,
-        mode: "markers",
-        type: "scatter",
-        name: "High Alert",
-        marker: { color: "orange", size: 10, symbol: "triangle-up" }
-    };
-
-    const layout = {
-        title: `Dengue cases and future alerts in ${district}`,
-        xaxis: { title: "Month-Year", tickangle: -45 },
-        yaxis: { title: "Cases / Probability" },
-        margin: { t: 50, b: 100 }
-    };
-
-    Plotly.newPlot("trend", [traceCases, traceProb, traceAlert], layout, {responsive: true});
+    Plotly.newPlot("chart",[traceCases,traceProb,traceAlert],{title:`Dengue cases and future alerts in ${district}`, xaxis:{title:"Month-Year", tickangle:-45}, yaxis:{title:"Cases / Probability"}, margin:{t:50,b:100}},{responsive:true});
 }
 
-// Plot district map
+// Plot Bangladesh district map
 function plotMap() {
     const year = document.getElementById("yearSelect").value;
 
-    // Count cases per district
-    let counts = {};
-    mapData.features.forEach(f => counts[f.properties.ADM2_EN] = 0);
-
-    casesData.concat(ewsData).forEach(d => {
-        if ((year === "All" || d.Year == year) && counts[d.District] !== undefined) {
-            counts[d.District] += d.Cases || d.Prob_High_Dengue || 0;
+    // Aggregate cases or probability by district
+    let dataForMap = {};
+    mapData.features.forEach(f=>{
+        const dName = f.properties.ADM2_EN;
+        let val = 0;
+        if(year==="All"){
+            // sum all years
+            val = casesData.filter(d=>d.District===dName).reduce((a,b)=>a+b.Cases,0);
+        } else {
+            const cases = casesData.filter(d=>d.District===dName && d.Year==year);
+            const ews   = ewsData.filter(d=>d.District===dName && d.Year==year);
+            val = cases.length>0? cases.reduce((a,b)=>a+b.Cases,0) : (ews.length>0 ? Math.max(...ews.map(d=>d.Prob_High_Dengue)) : 0);
         }
+        dataForMap[dName] = val;
     });
 
-    const mapValues = mapData.features.map(f => counts[f.properties.ADM2_EN] || 0);
+    const zValues = mapData.features.map(f=>dataForMap[f.properties.ADM2_EN] || 0);
 
-    const data = [{
-        type: "choropleth",
+    const trace = {
+        type:"choroplethmapbox",
         geojson: mapData,
-        locations: mapData.features.map(f => f.properties.ADM2_EN),
-        z: mapValues,
-        text: mapData.features.map(f => f.properties.ADM2_EN),
-        colorscale: "Reds",
-        colorbar: { title: "Cases / Prob" },
-        marker: { line: { width: 0.5, color: "grey" } }
-    }];
-
-    const layout = {
-        geo: {
-            scope: "asia",
-            fitbounds: "locations",
-            visible: true
-        },
-        margin: { t: 0, b: 0, l: 0, r: 0 }
+        locations: mapData.features.map(f=>f.properties.ADM2_EN),
+        z: zValues,
+        featureidkey:"properties.ADM2_EN",
+        colorscale:"YlOrRd",
+        colorbar:{title:"Cases / Prob"},
+        marker:{line:{width:0.5, color:"black"}}
     };
 
-    Plotly.newPlot("map", data, layout, {responsive: true});
+    const layout = {
+        mapbox:{style:"carto-positron", center:{lat:23.685, lon:90.3563}, zoom:6},
+        margin:{t:0,b:0,l:0,r:0}
+    };
+
+    Plotly.newPlot("map",[trace],layout,{responsive:true});
 }
 
 // Start
