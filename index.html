@@ -25,7 +25,7 @@
             margin-right: 15px;
             padding: 5px;
         }
-        #chart, #map {
+        #trend, #map {
             background: white;
             padding: 10px;
             border-radius: 8px;
@@ -38,7 +38,7 @@
 </head>
 <body>
 
-<h2>Dengue monthly cases and early warning dashboard</h2>
+<h2>Dengue dashboard Bangladesh</h2>
 
 <div id="controls">
     District:
@@ -50,7 +50,12 @@
     </select>
 </div>
 
-<div id="chart"></div>
+<!-- Trend Section -->
+<h3>Monthly cases and early warnings</h3>
+<div id="trend"></div>
+
+<!-- Map Section -->
+<h3>Bangladesh district map</h3>
 <div id="map"></div>
 
 <script>
@@ -86,10 +91,10 @@ async function loadData() {
         geoData = await resGeo.json();
 
         initControls();
-        plotData();
+        updateTrendAndMap();
     } catch (err) {
         console.error(err);
-        alert("Error loading JSON files. Make sure dengue_bd.json, dengue_ews.json, and bangladesh_districts_small.json exist.");
+        alert("Error loading JSON files. Check dengue_bd.json, dengue_ews.json, and bangladesh_districts_small.json.");
     }
 }
 
@@ -120,110 +125,69 @@ function initControls() {
 
     document.getElementById("districtSelect").value = districts[0];
 
-    document.getElementById("districtSelect").addEventListener("change", plotData);
-    document.getElementById("yearSelect").addEventListener("change", plotData);
+    document.getElementById("districtSelect").addEventListener("change", updateTrendAndMap);
+    document.getElementById("yearSelect").addEventListener("change", updateTrendAndMap);
 }
 
-// Plot line chart and future alerts
-function plotData() {
+// Update both trend and map
+function updateTrendAndMap() {
     const district = document.getElementById("districtSelect").value;
     const year = document.getElementById("yearSelect").value;
 
-    // Historical cases
+    // === Trend Section ===
     let filteredCases = casesData.filter(d => d.District === district);
     if (year !== "All") filteredCases = filteredCases.filter(d => d.Year == year);
     filteredCases.sort((a,b) => a.Year - b.Year || a.Month1 - b.Month1);
 
-    // Future EWS
     let filteredEWS = ewsData.filter(d => d.District === district);
     if (year !== "All") filteredEWS = filteredEWS.filter(d => d.Year == year);
     filteredEWS.sort((a,b) => a.Year - b.Year || a.Month - b.Month);
 
     const xCases = filteredCases.map(d => `${d.Month}-${d.Year}`);
     const yCases = filteredCases.map(d => d.Cases);
-
     const xEWS = filteredEWS.map(d => `${d.Month}-${d.Year}`);
     const yProb = filteredEWS.map(d => d.Prob_High_Dengue);
     const xAlert = xEWS.filter((_, i) => filteredEWS[i].High_Alert === 1);
     const yAlert = yProb.filter((_, i) => filteredEWS[i].High_Alert === 1);
 
-    const traceCases = {
-        x: xCases,
-        y: yCases,
-        mode: "lines+markers",
-        type: "scatter",
-        name: "Monthly cases",
-        line: { color: "#FF4136" },
-        marker: { size: 6 }
-    };
+    const traceCases = { x: xCases, y: yCases, mode: "lines+markers", type: "scatter", name: "Monthly cases", line: { color: "#FF4136" }, marker: { size: 6 } };
+    const traceProb = { x: xEWS, y: yProb, mode: "lines+markers", type: "scatter", name: "Predicted probability", line: { color: "#0074D9", dash: "dot" }, marker: { size: 6 } };
+    const traceAlert = { x: xAlert, y: yAlert, mode: "markers", type: "scatter", name: "High Alert", marker: { color: "orange", size: 10, symbol: "triangle-up" } };
 
-    const traceProb = {
-        x: xEWS,
-        y: yProb,
-        mode: "lines+markers",
-        type: "scatter",
-        name: "Predicted probability",
-        line: { color: "#0074D9", dash: "dot" },
-        marker: { size: 6 }
-    };
-
-    const traceAlert = {
-        x: xAlert,
-        y: yAlert,
-        mode: "markers",
-        type: "scatter",
-        name: "High Alert",
-        marker: { color: "orange", size: 10, symbol: "triangle-up" }
-    };
-
-    Plotly.newPlot("chart", [traceCases, traceProb, traceAlert], {
-        title: `Dengue cases and future alerts in ${district}`,
+    Plotly.newPlot("trend", [traceCases, traceProb, traceAlert], {
+        title: `Dengue cases & future alerts in ${district}`,
         xaxis: { title: "Month-Year", tickangle: -45 },
         yaxis: { title: "Cases / Probability" },
         margin: { t: 50, b: 100 }
     }, {responsive: true});
 
-    // Update map
-    plotMap(year);
-}
-
-// Plot choropleth map
-function plotMap(selectedYear = "All") {
+    // === Map Section ===
     const districtCases = {};
-    geoData.features.forEach(f => {
-        const name = f.properties.ADM2_EN;
-        districtCases[name] = 0;
-    });
+    geoData.features.forEach(f => { districtCases[f.properties.ADM2_EN] = 0; });
 
     casesData.forEach(d => {
-        if ((selectedYear === "All") || (d.Year == selectedYear)) {
-            if (districtCases.hasOwnProperty(d.District)) {
-                districtCases[d.District] += d.Cases;
-            }
+        if ((year === "All") || (d.Year == year)) {
+            if (districtCases.hasOwnProperty(d.District)) districtCases[d.District] += d.Cases;
         }
     });
 
-    const data = [{
+    const mapData = [{
         type: "choroplethmapbox",
         geojson: geoData,
         locations: Object.keys(districtCases),
         z: Object.values(districtCases),
         featureidkey: "properties.ADM2_EN",
         colorscale: "YlOrRd",
-        marker: {line: {width: 0.5, color: "white"}},
-        colorbar: {title: "Total cases"}
+        marker: { line: { width: 0.5, color: "white" } },
+        colorbar: { title: "Total cases" }
     }];
 
-    const layout = {
-        mapbox: {
-            style: "carto-positron",
-            center: {lon: 90.5, lat: 23.5},
-            zoom: 6
-        },
-        margin: {t:0, b:0}
+    const mapLayout = {
+        mapbox: { style: "carto-positron", center: { lon: 90.5, lat: 23.5 }, zoom: 6 },
+        margin: { t:0, b:0 }
     };
 
-    Plotly.newPlot("map", data, layout, {responsive: true});
+    Plotly.newPlot("map", mapData, mapLayout, {responsive: true});
 }
 
 // Start
