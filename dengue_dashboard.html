@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dengue dashboard Bangladesh</title>
+
+    <!-- Plotly for chart -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        h2 {
+            color: #333;
+        }
+
+        #controls {
+            margin-bottom: 20px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        select {
+            margin-right: 15px;
+            padding: 5px;
+        }
+
+        #chart {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>Dengue monthly cases dashboard</h2>
+
+<div id="controls">
+    District:
+    <select id="districtSelect"></select>
+
+    Year:
+    <select id="yearSelect">
+        <option value="All">All</option>
+    </select>
+</div>
+
+<div id="chart"></div>
+
+<script>
+let fullData = [];
+
+// Load JSON data
+async function loadData() {
+    try {
+        const response = await fetch("dengue_bd.json");
+        const jsonData = await response.json();
+
+        fullData = jsonData.map(d => ({
+            District: d.District || "Unknown",
+            Month: d.Month || "Unknown",
+            Month1: Number(d.Month1) || 0,
+            Year: Number(d.Year) || 0,
+            Cases: Number(d.Monthly_cases) || 0
+        }));
+
+        initControls();
+        plotData();
+    } catch (err) {
+        console.error(err);
+        alert("Error loading JSON file. Make sure 'dengue_bd.json' exists in the same folder.");
+    }
+}
+
+// Unique values
+function getUnique(data, key) {
+    return [...new Set(data.map(d => d[key]))];
+}
+
+// Populate dropdown
+function populateDropdown(id, values) {
+    const select = document.getElementById(id);
+    select.innerHTML = ""; // Clear previous options
+
+    values.forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.text = v;
+        select.appendChild(opt);
+    });
+}
+
+// Initialize controls
+function initControls() {
+    const districts = getUnique(fullData, "District").sort();
+    const years = getUnique(fullData, "Year").sort();
+
+    populateDropdown("districtSelect", districts);
+    populateDropdown("yearSelect", ["All", ...years]);
+
+    document.getElementById("districtSelect").value = districts[0];
+
+    document.getElementById("districtSelect").addEventListener("change", plotData);
+    document.getElementById("yearSelect").addEventListener("change", plotData);
+}
+
+// Plot chart
+function plotData() {
+    const district = document.getElementById("districtSelect").value;
+    const year = document.getElementById("yearSelect").value;
+
+    let filtered = fullData.filter(d => d.District === district);
+
+    if (year !== "All") {
+        filtered = filtered.filter(d => d.Year == year);
+    }
+
+    filtered.sort((a, b) => a.Year - b.Year || a.Month1 - b.Month1);
+
+    const x = filtered.map(d => `${d.Month}-${d.Year}`);
+    const y = filtered.map(d => d.Cases);
+
+    const trace = {
+        x: x,
+        y: y,
+        mode: "lines+markers",
+        type: "scatter",
+        name: "Cases",
+        line: { color: "#FF4136" },
+        marker: { size: 6 }
+    };
+
+    const layout = {
+        title: `Dengue cases in ${district}`,
+        xaxis: { title: "Month-Year", tickangle: -45 },
+        yaxis: { title: "Monthly cases" },
+        margin: { t: 50, b: 100 }
+    };
+
+    Plotly.newPlot("chart", [trace], layout, {responsive: true});
+}
+
+// Start
+loadData();
+</script>
+
+</body>
+</html>
