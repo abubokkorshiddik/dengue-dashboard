@@ -39,7 +39,7 @@
 
 <body>
 
-<h2>Dengue monthly cases dashboard</h2>
+<h2>Dengue monthly cases and early warning dashboard</h2>
 
 <div id="controls">
     District:
@@ -54,27 +54,41 @@
 <div id="chart"></div>
 
 <script>
-let fullData = [];
+let casesData = [];
+let ewsData = [];
 
-// Load JSON data
+// Load both JSON files
 async function loadData() {
     try {
-        const response = await fetch("dengue_bd.json");
-        const jsonData = await response.json();
+        const resCases = await fetch("dengue_bd.json");
+        const jsonCases = await resCases.json();
 
-        fullData = jsonData.map(d => ({
-            District: d.District || "Unknown",
-            Month: d.Month || "Unknown",
-            Month1: Number(d.Month1) || 0,
-            Year: Number(d.Year) || 0,
-            Cases: Number(d.Monthly_cases) || 0
+        const resEWS = await fetch("dengue_ews.json");
+        const jsonEWS = await resEWS.json();
+
+        // Store historical cases
+        casesData = jsonCases.map(d => ({
+            District: d.District,
+            Month: d.Month,
+            Month1: Number(d.Month1),
+            Year: Number(d.Year),
+            Cases: Number(d.Monthly_cases)
+        }));
+
+        // Store future EWS
+        ewsData = jsonEWS.map(d => ({
+            District: d.District,
+            Month: Number(d.Month),
+            Year: Number(d.Year),
+            Prob_High_Dengue: Number(d.Prob_High_Dengue),
+            High_Alert: Number(d.High_Alert)
         }));
 
         initControls();
         plotData();
     } catch (err) {
         console.error(err);
-        alert("Error loading JSON file. Make sure 'dengue_bd.json' exists in the same folder.");
+        alert("Error loading JSON files. Make sure both dengue_bd.json and dengue_ews.json exist in the same folder.");
     }
 }
 
@@ -86,8 +100,7 @@ function getUnique(data, key) {
 // Populate dropdown
 function populateDropdown(id, values) {
     const select = document.getElementById(id);
-    select.innerHTML = ""; // Clear previous options
-
+    select.innerHTML = "";
     values.forEach(v => {
         const opt = document.createElement("option");
         opt.value = v;
@@ -98,8 +111,8 @@ function populateDropdown(id, values) {
 
 // Initialize controls
 function initControls() {
-    const districts = getUnique(fullData, "District").sort();
-    const years = getUnique(fullData, "Year").sort();
+    const districts = getUnique(casesData, "District").sort();
+    const years = getUnique(casesData.concat(ewsData), "Year").sort();
 
     populateDropdown("districtSelect", districts);
     populateDropdown("yearSelect", ["All", ...years]);
@@ -115,35 +128,62 @@ function plotData() {
     const district = document.getElementById("districtSelect").value;
     const year = document.getElementById("yearSelect").value;
 
-    let filtered = fullData.filter(d => d.District === district);
+    // Historical cases
+    let filteredCases = casesData.filter(d => d.District === district);
+    if (year !== "All") filteredCases = filteredCases.filter(d => d.Year == year);
+    filteredCases.sort((a,b) => a.Year - b.Year || a.Month1 - b.Month1);
 
-    if (year !== "All") {
-        filtered = filtered.filter(d => d.Year == year);
-    }
+    // Future EWS
+    let filteredEWS = ewsData.filter(d => d.District === district);
+    if (year !== "All") filteredEWS = filteredEWS.filter(d => d.Year == year);
+    filteredEWS.sort((a,b) => a.Year - b.Year || a.Month - b.Month);
 
-    filtered.sort((a, b) => a.Year - b.Year || a.Month1 - b.Month1);
+    // X axis
+    const xCases = filteredCases.map(d => `${d.Month}-${d.Year}`);
+    const yCases = filteredCases.map(d => d.Cases);
 
-    const x = filtered.map(d => `${d.Month}-${d.Year}`);
-    const y = filtered.map(d => d.Cases);
+    const xEWS = filteredEWS.map(d => `${d.Month}-${d.Year}`);
+    const yProb = filteredEWS.map(d => d.Prob_High_Dengue);
+    const xAlert = xEWS.filter((_, i) => filteredEWS[i].High_Alert === 1);
+    const yAlert = yProb.filter((_, i) => filteredEWS[i].High_Alert === 1);
 
-    const trace = {
-        x: x,
-        y: y,
+    const traceCases = {
+        x: xCases,
+        y: yCases,
         mode: "lines+markers",
         type: "scatter",
-        name: "Cases",
+        name: "Monthly cases",
         line: { color: "#FF4136" },
         marker: { size: 6 }
     };
 
+    const traceProb = {
+        x: xEWS,
+        y: yProb,
+        mode: "lines+markers",
+        type: "scatter",
+        name: "Predicted probability",
+        line: { color: "#0074D9", dash: "dot" },
+        marker: { size: 6 }
+    };
+
+    const traceAlert = {
+        x: xAlert,
+        y: yAlert,
+        mode: "markers",
+        type: "scatter",
+        name: "High Alert",
+        marker: { color: "orange", size: 10, symbol: "triangle-up" }
+    };
+
     const layout = {
-        title: `Dengue cases in ${district}`,
+        title: `Dengue cases and future alerts in ${district}`,
         xaxis: { title: "Month-Year", tickangle: -45 },
-        yaxis: { title: "Monthly cases" },
+        yaxis: { title: "Cases / Probability" },
         margin: { t: 50, b: 100 }
     };
 
-    Plotly.newPlot("chart", [trace], layout, {responsive: true});
+    Plotly.newPlot("chart", [traceCases, traceProb, traceAlert], layout, {responsive: true});
 }
 
 // Start
