@@ -2,143 +2,224 @@
 <html>
 <head>
     <title>Dengue dashboard Bangladesh</title>
+
+    <!-- Plotly for charts and map -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/geojson@0.5.0/geojson.min.js"></script>
+
     <style>
-        body { font-family: Arial; margin: 20px; background: #f5f5f5; }
-        h2 { color: #333; }
-        .controls { margin-bottom: 20px; padding: 10px; background: white; border-radius: 8px; }
-        select { margin-right: 15px; padding: 5px; }
-        #trendChart, #monthMap { background: white; padding: 10px; border-radius: 8px; margin-top: 20px; }
+        body {
+            font-family: Arial;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        h2 {
+            color: #333;
+        }
+
+        .section { 
+            background: white; 
+            padding: 10px; 
+            border-radius: 8px; 
+            margin-bottom: 50px; 
+        }
+
+        .controls {
+            margin-bottom: 10px;
+        }
+
+        select {
+            margin-right: 15px;
+            padding: 5px;
+        }
+
+        #trendChart, #monthMap {
+            width: 100%;
+        }
     </style>
 </head>
+
 <body>
 
 <h2>Section 1: Monthly trend by district</h2>
-<div class="controls">
-    District: <select id="districtSelect"></select>
-    Year: <select id="yearSelect"><option value="All">All</option></select>
+<div class="section">
+    <div class="controls">
+        District: <select id="districtSelect"></select>
+        Year: <select id="yearSelect"><option value="All">All</option></select>
+    </div>
+    <div id="trendChart" style="height:400px;"></div>
 </div>
-<div id="trendChart"></div>
 
 <h2>Section 2: Map view by month</h2>
-<div class="controls">
-    Year: <select id="mapYearSelect"></select>
-    Month: <select id="mapMonthSelect"></select>
-    Data type: 
-    <select id="mapTypeSelect">
-        <option value="Cases">Cases</option>
-        <option value="Prob_High_Dengue">Predicted probability</option>
-    </select>
+<div class="section">
+    <div class="controls">
+        Year: <select id="mapYearSelect"></select>
+        Month: <select id="mapMonthSelect"></select>
+        Data type: 
+        <select id="mapTypeSelect">
+            <option value="Cases">Cases</option>
+            <option value="Prob_High_Dengue">Predicted probability</option>
+        </select>
+    </div>
+    <div id="monthMap" style="height:600px;"></div>
 </div>
-<div id="monthMap" style="height:600px;"></div>
 
 <script>
-let casesData=[], ewsData=[], mapData=[];
+let casesData = [];
+let ewsData = [];
+let districtsGeo = [];
 
-// Load JSONs
+// Load all JSON files
 async function loadData() {
-    const [jsonCases, jsonEWS, jsonMap] = await Promise.all([
-        fetch("dengue_bd.json").then(r=>r.json()),
-        fetch("dengue_ews.json").then(r=>r.json()),
-        fetch("bangladesh_districts_small.json").then(r=>r.json())
-    ]);
-    casesData = jsonCases.map(d=>({District:d.District, Month:d.Month, Month1:+d.Month1, Year:+d.Year, Cases:+d.Monthly_cases}));
-    ewsData   = jsonEWS.map(d=>({District:d.District, Month:+d.Month, Year:+d.Year, Prob_High_Dengue:+d.Prob_High_Dengue, High_Alert:+d.High_Alert}));
-    mapData   = jsonMap;
+    try {
+        const resCases = await fetch("dengue_bd.json");
+        const jsonCases = await resCases.json();
+        const resEWS = await fetch("dengue_ews.json");
+        const jsonEWS = await resEWS.json();
+        const resGeo = await fetch("bangladesh_districts_small.json");
+        districtsGeo = await resGeo.json();
 
-    initTrendControls();
-    initMapControls();
-    plotTrend();
-    plotMonthMap();
+        casesData = jsonCases.map(d => ({
+            District: d.District,
+            Month: d.Month,
+            Month1: Number(d.Month1),
+            Year: Number(d.Year),
+            Cases: Number(d.Monthly_cases)
+        }));
+
+        ewsData = jsonEWS.map(d => ({
+            District: d.District,
+            Month: Number(d.Month),
+            Year: Number(d.Year),
+            Prob_High_Dengue: Number(d.Prob_High_Dengue),
+            High_Alert: Number(d.High_Alert)
+        }));
+
+        initTrendControls();
+        initMapControls();
+        plotTrend();
+        plotMap();
+    } catch (err) {
+        console.error(err);
+        alert("Error loading JSON files. Make sure all JSONs exist in the same folder.");
+    }
 }
 
-// Utilities
-function getUnique(data,key){return[...new Set(data.map(d=>d[key]))];}
-function populateDropdown(id, values){
-    const sel=document.getElementById(id); sel.innerHTML="";
-    values.forEach(v=>{ const opt=document.createElement("option"); opt.value=v; opt.text=v; sel.appendChild(opt); });
+// Utility for unique values
+function getUnique(data, key) {
+    return [...new Set(data.map(d => d[key]))];
+}
+
+// Populate dropdown
+function populateDropdown(id, values) {
+    const select = document.getElementById(id);
+    select.innerHTML = "";
+    values.forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.text = v;
+        select.appendChild(opt);
+    });
 }
 
 // Section 1: Trend controls
-function initTrendControls(){
-    populateDropdown("districtSelect", getUnique(casesData,"District").sort());
-    populateDropdown("yearSelect", ["All", ...getUnique(casesData.concat(ewsData),"Year").sort()]);
+function initTrendControls() {
+    const districts = getUnique(casesData, "District").sort();
+    const years = getUnique(casesData.concat(ewsData), "Year").sort();
+
+    populateDropdown("districtSelect", districts);
+    populateDropdown("yearSelect", ["All", ...years]);
+
+    document.getElementById("districtSelect").value = districts[0];
+
     document.getElementById("districtSelect").addEventListener("change", plotTrend);
     document.getElementById("yearSelect").addEventListener("change", plotTrend);
 }
 
 // Section 2: Map controls
-function initMapControls(){
-    populateDropdown("mapYearSelect", getUnique(casesData.concat(ewsData),"Year").sort());
-    populateDropdown("mapMonthSelect", [1,2,3,4,5,6,7,8,9,10,11,12]);
-    document.getElementById("mapYearSelect").addEventListener("change", plotMonthMap);
-    document.getElementById("mapMonthSelect").addEventListener("change", plotMonthMap);
-    document.getElementById("mapTypeSelect").addEventListener("change", plotMonthMap);
+function initMapControls() {
+    const years = getUnique(casesData.concat(ewsData), "Year").sort();
+    const months = ["1","2","3","4","5","6","7","8","9","10","11","12"];
+
+    populateDropdown("mapYearSelect", years);
+    populateDropdown("mapMonthSelect", months);
+
+    document.getElementById("mapYearSelect").addEventListener("change", plotMap);
+    document.getElementById("mapMonthSelect").addEventListener("change", plotMap);
+    document.getElementById("mapTypeSelect").addEventListener("change", plotMap);
 }
 
-// Section 1: Trend chart
-function plotTrend(){
+// Plot monthly trend
+function plotTrend() {
     const district = document.getElementById("districtSelect").value;
-    const year     = document.getElementById("yearSelect").value;
+    const year = document.getElementById("yearSelect").value;
 
-    let fCases = casesData.filter(d=>d.District===district);
-    if(year!=="All") fCases = fCases.filter(d=>d.Year==year);
-    fCases.sort((a,b)=>a.Year-b.Year||a.Month1-b.Month1);
+    let filteredCases = casesData.filter(d => d.District === district);
+    if (year !== "All") filteredCases = filteredCases.filter(d => d.Year == year);
+    filteredCases.sort((a,b) => a.Year - b.Year || a.Month1 - b.Month1);
 
-    let fEWS = ewsData.filter(d=>d.District===district);
-    if(year!=="All") fEWS = fEWS.filter(d=>d.Year==year);
-    fEWS.sort((a,b)=>a.Year-b.Year||a.Month-b.Month);
+    let filteredEWS = ewsData.filter(d => d.District === district);
+    if (year !== "All") filteredEWS = filteredEWS.filter(d => d.Year == year);
+    filteredEWS.sort((a,b) => a.Year - b.Year || a.Month - b.Month);
 
-    const xCases=fCases.map(d=>`${d.Month}-${d.Year}`);
-    const yCases=fCases.map(d=>d.Cases);
+    const xCases = filteredCases.map(d => `${d.Month}-${d.Year}`);
+    const yCases = filteredCases.map(d => d.Cases);
 
-    const xEWS=fEWS.map(d=>`${d.Month}-${d.Year}`);
-    const yProb=fEWS.map(d=>d.Prob_High_Dengue);
-    const xAlert=xEWS.filter((_,i)=>fEWS[i].High_Alert===1);
-    const yAlert=yProb.filter((_,i)=>fEWS[i].High_Alert===1);
+    const xEWS = filteredEWS.map(d => `${d.Month}-${d.Year}`);
+    const yProb = filteredEWS.map(d => d.Prob_High_Dengue);
+    const xAlert = xEWS.filter((_,i) => filteredEWS[i].High_Alert===1);
+    const yAlert = yProb.filter((_,i) => filteredEWS[i].High_Alert===1);
 
-    const traceCases={x:xCases,y:yCases,mode:"lines+markers",type:"scatter",name:"Monthly cases",line:{color:"#FF4136"},marker:{size:6}};
-    const traceProb={x:xEWS,y:yProb,mode:"lines+markers",type:"scatter",name:"Predicted probability",line:{color:"#0074D9",dash:"dot"},marker:{size:6}};
-    const traceAlert={x:xAlert,y:yAlert,mode:"markers",type:"scatter",name:"High Alert",marker:{color:"orange",size:10,symbol:"triangle-up"}};
+    const traceCases = { x:xCases, y:yCases, mode:"lines+markers", type:"scatter", name:"Monthly cases", line:{color:"#FF4136"}, marker:{size:6} };
+    const traceProb = { x:xEWS, y:yProb, mode:"lines+markers", type:"scatter", name:"Predicted probability", line:{color:"#0074D9", dash:"dot"}, marker:{size:6} };
+    const traceAlert = { x:xAlert, y:yAlert, mode:"markers", type:"scatter", name:"High Alert", marker:{color:"orange", size:10, symbol:"triangle-up"} };
 
-    Plotly.newPlot("trendChart",[traceCases,traceProb,traceAlert],
-        {title:`Dengue cases and future alerts in ${district}`, xaxis:{title:"Month-Year", tickangle:-45}, yaxis:{title:"Cases / Probability"}, margin:{t:50,b:100}},{responsive:true});
+    const layout = { title:`Dengue cases and future alerts in ${district}`, xaxis:{title:"Month-Year", tickangle:-45}, yaxis:{title:"Cases / Probability"}, margin:{t:50,b:100} };
+    Plotly.newPlot("trendChart",[traceCases, traceProb, traceAlert],layout,{responsive:true});
 }
 
-// Section 2: Month map
-function plotMonthMap(){
-    const year  = +document.getElementById("mapYearSelect").value;
-    const month = +document.getElementById("mapMonthSelect").value;
-    const type  = document.getElementById("mapTypeSelect").value; // "Cases" or "Prob_High_Dengue"
+// Plot map by selected month
+function plotMap() {
+    const year = Number(document.getElementById("mapYearSelect").value);
+    const month = Number(document.getElementById("mapMonthSelect").value);
+    const type = document.getElementById("mapTypeSelect").value;
 
-    // Prepare data per district
-    let values = mapData.features.map(f=>{
-        const dName=f.properties.ADM2_EN;
-        let val=0;
-        if(type==="Cases"){
-            const rec=casesData.find(d=>d.District===dName && d.Year===year && d.Month===month);
-            val=rec? rec.Cases:0;
-        } else{
-            const rec=ewsData.find(d=>d.District===dName && d.Year===year && d.Month===month);
-            val=rec? rec.Prob_High_Dengue:0;
-        }
-        return val;
+    // Combine cases + EWS depending on type
+    let data = [];
+    if(type==="Cases") {
+        data = casesData.filter(d => d.Year===year && d.Month1===month);
+    } else {
+        data = ewsData.filter(d => d.Year===year && d.Month===month);
+    }
+
+    // Map data for all districts
+    const districtValues = districtsGeo.features.map(f => {
+        const found = data.find(d => d.District === f.properties.ADM2_EN);
+        return found ? (type==="Cases"?found.Cases:found.Prob_High_Dengue) : 0;
     });
 
-    const trace={type:"choroplethmapbox", geojson:mapData,
-        locations:mapData.features.map(f=>f.properties.ADM2_EN),
-        z:values,
-        featureidkey:"properties.ADM2_EN",
-        colorscale:"YlOrRd",
-        colorbar:{title:type},
-        marker:{line:{width:0.5,color:"black"}}};
+    const traceMap = {
+        type: "choroplethmapbox",
+        geojson: districtsGeo,
+        locations: districtsGeo.features.map(f=>f.properties.ADM2_EN),
+        z: districtValues,
+        colorscale: "YlOrRd",
+        colorbar: {title: type},
+        featureidkey: "properties.ADM2_EN"
+    };
 
-    const layout={mapbox:{style:"carto-positron",center:{lat:23.685,lon:90.3563},zoom:6},margin:{t:0,b:0,l:0,r:0}};
-    Plotly.newPlot("monthMap",[trace],layout,{responsive:true});
+    const layoutMap = {
+        mapbox: { style: "carto-positron", center:{lat:23.685, lon:90.3563}, zoom:6 },
+        margin:{t:0,b:0}
+    };
+
+    Plotly.newPlot("monthMap",[traceMap],layoutMap,{responsive:true});
 }
 
-// Start
+// Start loading data
 loadData();
 </script>
+
 </body>
 </html>
